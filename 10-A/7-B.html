@@ -1,0 +1,207 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>お手玉みたいな</title>
+<canvas id="cv" width="360" height="640" style="background:#0e1528;display:block;margin:0 auto;"></canvas>
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+const W = cv.width;         
+const H = cv.height;        
+const floor = { x: 0, y: H-40, w: W, h: 40 };   
+
+const player = { 
+  x: (W-100)/2, y: floor.y - 18, w: 100, h: 16, 
+  speed: 280 
+};
+
+// ── パラメータ ────────────────────────────────
+const g = 150;             
+const ballRadius = 10;     
+const wallBounce = 0.98;   
+
+let keys = {};
+let balls = [];
+let isRunning = false;
+let isCountingDown = false;
+let countdownLeft = 0;
+let gameOver = false;
+let last = performance.now();
+let lives = 3;   // ライフは3
+let score = 0;   // スコア
+
+// ── 入力 ─────────────────────────────────────────
+addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === 'Enter') triggerStartOrRestart();
+});
+addEventListener('keyup', e => keys[e.key] = false);
+
+// ── カウントダウン＆開始/リスタート ────────────────
+function triggerStartOrRestart() {
+  if (isCountingDown) return;
+  isCountingDown = true;
+  countdownLeft = 3;
+  gameOver = false;
+  isRunning = false;
+  lives = 3;   // リスタート時にライフリセット
+  score = 0;   // スコアリセット
+
+  balls = [];
+  player.x = (W - player.w) / 2;
+  player.y = floor.y - player.h;
+
+  const tick = () => {
+    countdownLeft--;
+    if (countdownLeft > 0) {
+      setTimeout(tick, 1000);
+    } else {
+      isCountingDown = false;
+      startGame();
+    }
+  };
+  setTimeout(tick, 1000);
+}
+
+function startGame() {
+  isRunning = true;
+  spawnBall("red");   // 1個目は赤
+  setTimeout(() => spawnBall("blue"), 3000); // 2個目は青、3秒後
+}
+
+function spawnBall(color) {
+  const x = Math.random() * (W - 2*ballRadius) + ballRadius;
+  const y = H*0.5;   
+
+  const vx = (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random()*40); 
+  const vy = - (150 + Math.random()*100); 
+
+  balls.push({
+    x, y, vx, vy, alive: true, color: color
+  });
+}
+
+function rectCircleHit(rx, ry, rw, rh, cx, cy, cr) {
+  const nearestX = Math.max(rx, Math.min(cx, rx + rw));
+  const nearestY = Math.max(ry, Math.min(cy, ry + rh));
+  const dx = cx - nearestX;
+  const dy = cy - nearestY;
+  return (dx*dx + dy*dy) <= cr*cr;
+}
+
+function update(dt) {
+  if (!isRunning) return;
+
+  if (keys['ArrowLeft'])  player.x -= player.speed * dt;
+  if (keys['ArrowRight']) player.x += player.speed * dt;
+
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.w > W) player.x = W - player.w;
+
+  for (const b of balls) {
+    if (!b.alive) continue;
+    b.vy += g * dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+
+    if (b.x - ballRadius < 0) {
+      b.x = ballRadius;
+      b.vx = -b.vx * wallBounce;
+    } else if (b.x + ballRadius > W) {
+      b.x = W - ballRadius;
+      b.vx = -b.vx * wallBounce;
+    }
+
+    const headRect = { x: player.x, y: player.y, w: player.w, h: player.h };
+    const wasAboveHead = (b.y - b.vy*dt) <= player.y - ballRadius;
+    if (wasAboveHead && b.vy >= 0 && rectCircleHit(headRect.x, headRect.y, headRect.w, 4, b.x, b.y, ballRadius)) {
+      b.y = player.y - ballRadius;
+
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      b.vx = dir * (50 + Math.random()*50);
+
+      const minBoost = 250;
+      const maxBoost = 400;
+      const boost = minBoost + Math.random() * (maxBoost - minBoost);
+      b.vy = -boost;
+
+      score++;   // スコア加算
+    }
+
+    // 地面に落ちたとき
+    if (b.y + ballRadius >= floor.y) {
+      b.alive = false;
+      lives--;
+      if (lives <= 0) {
+        gameOver = true;
+        isRunning = false;
+      } else {
+        setTimeout(() => {
+          b.x = Math.random() * (W - 2*ballRadius) + ballRadius;
+          b.y = H*0.5;
+          b.vx = (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random()*40);
+          b.vy = - (150 + Math.random()*100);
+          b.alive = true;
+        }, 1000);
+      }
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // 地面
+  ctx.fillStyle = '#203060';
+  ctx.fillRect(floor.x, floor.y, floor.w, floor.h);
+
+  // プレイヤー
+  ctx.fillStyle = '#7ef5e1';
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+
+  // ボール
+  for (const b of balls) {
+    if (!b.alive) continue;
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, ballRadius, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // ライフを地面に埋めるように大きく表示（左下）
+  for (let i = 0; i < lives; i++) {
+    ctx.fillStyle = "#ff4d4d"; // 赤いライフ
+    ctx.beginPath();
+    ctx.arc(40 + i*40, H-20, 12, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // スコアを地面に埋めるように数字で表示（右下）
+  ctx.fillStyle = "#4da6ff"; // 青い文字
+  ctx.font = '20px ui-monospace, monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(`Score: ${score}`, W-10, H-20);
+
+  // カウントダウンやゲームオーバー表示
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = '20px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  if (isCountingDown) {
+    ctx.fillText(`${countdownLeft}`, W/2, H/2 - 12);
+  } else if (!isRunning && !gameOver) {
+    ctx.fillText('Enterでスタート', W/2, H/2 - 12);
+  }
+  if (gameOver) {
+    ctx.fillText('Enterでリスタート', W/2, H/2 - 12);
+  }
+}
+
+function loop(now) {
+  const dt = (now - last) / 1000;
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
